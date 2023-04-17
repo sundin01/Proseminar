@@ -1,0 +1,375 @@
+---
+title: "ModE_RAhires_temp"
+author: "Patrick Bigler"
+date: "2023-04-16"
+output: html_document
+---
+
+
+```{r activates_the_packages_in_the_libraries}
+library(ncdf4)
+library(maps)
+library(ggmap)
+library(tidyverse)
+library(mapdata)
+library(reshape)
+library(RColorBrewer)
+library(knitr)
+library(conflicted) 
+library(ggplot2)
+library(ggsn)
+library(ggspatial)
+library(cowplot)
+library(tinytex)
+library(grid)
+library(viridis)
+library(viridisLite)
+library(weathermetrics)
+library(colorRamps)
+library(colorRamp2)
+library(ggpubr)
+```
+
+```{r read_the_files}
+# Check if the path is right
+getwd()
+
+# read the high resolution file for 2m-temperature (ModE-RA)
+hire_temp2_1421_2008 <- nc_open("../Data/ModE_RAhires_temp")
+
+
+# read the high resolution file for 2m-temperature (ModE-RA)
+lowre_temp2_1421_2008 <- nc_open("../Data/ModE_RA_temp")
+
+# read the high resolution file for 2m-temperature (ERA-5 RA)
+ERA_5_temp_1940_2005 <- nc_open("../Data/ERA_5_temp")
+```
+
+```{r read_the_dimensions}
+#read the time dimensions
+time.hire.temp <- hire_temp2_1421_2008$dim[[1]]$vals 
+#read the logitude dimensions
+lon.hire.temp <- hire_temp2_1421_2008$dim[[2]]$vals
+#read the latitude dimensions
+lat.hire.temp <- hire_temp2_1421_2008$dim[[3]]$vals
+
+#read the time dimensions
+time.lowre.temp <- lowre_temp2_1421_2008$dim[[1]]$vals 
+#read the logitude dimensions
+lon.lowre.temp <- lowre_temp2_1421_2008$dim[[2]]$vals
+#read the latitude dimensions
+lat.lowre.temp <- lowre_temp2_1421_2008$dim[[3]]$vals
+
+# change the longitude from 0°- 360° to -180°-180°
+ERA_5_temp_1940_2005 $dim[[1]]$vals <- seq(-179.75, to = 180, by = 0.25)
+lon.ERA.temp <- ERA_5_temp_1940_2005$dim[[1]]$vals
+#read the latitude dimensions
+lat.ERA.temp <- ERA_5_temp_1940_2005$dim[[2]]$vals
+#read the time dimensions
+time.ERA.temp <- ERA_5_temp_1940_2005$dim[[3]]$vals 
+```
+
+Functions:
+
+```{r Function_to_create_a_5_year_period}
+# For ModRe
+create.a.period <- function(ann) {
+# We use the formula to calculate a index because we want to start on January
+  index = (ann - 1421) * 12 + 1
+# Read the file and save the values in an array
+  my.vec <- ncvar_get(hire_temp2_1421_2008, varid = "temp2", 
+                           start = c(1, 1, index), count = c(-1, -1, 60))
+# Take the mean for each cell (each cell contains 60 values)
+  my.array <- apply(my.vec, c(1, 2), mean)
+  return(my.array)
+}
+
+# For ERA-5
+create.a.period.ERA.5 <- function(ann) {
+# We use the formula to calculate a index because we want to start on January
+  index = (ann - 1940) * 12 + 1
+# Read the file and save the values in an array
+  my.vec <- ncvar_get(ERA_5_temp_1940_2005, varid = "t2m", 
+                           start = c(1, 1, index), count = c(-1, -1, 60))
+# Take the mean for each cell (each cell contains 60 values)
+  my.array <- apply(my.vec, c(1, 2), mean)
+  return(my.array)
+}
+```
+
+```{r Function_to_read_a_certain_year}
+#for ModRe
+create.a.year <- function(ann) {
+# We use the formula to calculate a index because we want to start on January  
+  index = (ann - 1421) *12 + 1
+# Read the file and save the values in an array  
+  my.vec <- ncvar_get(hire_temp2_1421_2008, varid = "temp2", 
+                           start = c(1, 1, index), count = c(-1, -1, 12))
+# Take the mean for each cell (each cell contains 60 values)  
+  my.array <- apply(my.vec, c(1, 2), mean)
+  return(my.array)
+}
+
+#For ERA-5
+create.a.year.ERA.5 <- function(ann) {
+  index = (ann - 1940) * 12 + 1
+# Read the file and save the values in an array  
+  my.vec <- ncvar_get(ERA_5_temp_1940_2005,, varid = "t2m", 
+                           start = c(1, 1, index), count = c(-1, -1, 12))
+# Take the mean for each cell (each cell contains 60 values)    
+  my.array <- apply(my.vec, c(1, 2), mean)
+  return(my.array)
+}
+```
+
+```{r Function_to_read_djf_period}
+# Function to read the seasonal djf mean value for each year in a 5-year-period
+create.a.djf.period <- function(ann) {
+# We use the formula to calculate a index because we want to start on December
+  index.start <- (ann - 1421) * 12
+# Read the file and save the values in an array    
+  hire.temp2.array <- ncvar_get(hire_temp2_1421_2008, varid = "temp2",
+                            start=c(1, 1, index.start ), count=c(-1, -1, 60 ))
+# create a empty vector.
+  numbers.of.month <- c()  
+# loop to fill the vector ( we want only Dec, Jan, Feb for each year)
+  for (i in 1:5) {
+    new.value.1 = i * 12 - 11
+    new.value.2 = i * 12 - 10
+    new.value.3 = i * 12 - 9
+# Fill the vector with every turn  
+    numbers.of.month = c(numbers.of.month, 
+                         new.value.1, 
+                         new.value.2, 
+                         new.value.3)
+  }
+# Create an array an read all the values we need 
+# Every longitude (1:184), every latitude (1:192) and our special time vector
+  sub.array <- hire.temp2.array[c(1:384), c(1:192), numbers.of.month]
+# Take the seasonal mean and return the end array with djf season for 5 years
+  end.array <- apply(sub.array, c(1, 2), mean)
+  return(end.array)
+}
+```
+
+```{r Function_to_read_djf_year}
+# For ModE-RA
+create.a.djf.year <- function(ann) {
+# We use the formula to calculate a index because we want to start on December
+  index.start <- (ann - 1421) * 12
+# Read the file and save the values in an array      
+  hire.temp2.array <- ncvar_get(hire_temp2_1421_2008, varid = "temp2",
+                            start=c(1, 1, index.start ), count=c(-1, -1, 3 ))
+# Take the mean for each cell (each cell contains 3 values)  
+  end.array <- apply(hire.temp2.array, c(1, 2), mean)
+  return(end.array)
+}
+
+# For ERA-5
+create.a.djf.year.anomly <- function(ann) {
+# We use the formula to calculate a index because we want to start on December
+  index.start <- (ann - 1421) * 12
+# Read the file and save the values in an array      
+  hire.temp2.array <- ncvar_get(hire_temp2_1421_2008,varid = "temp2",
+                                  #use the selected coordinates here!
+                            start = c(1, 1, index.start ),
+                            #count only for this cell but for all time!
+                            count = c(-1, -1, 3 ))
+# Take the mean for each cell (each cell contains 3 values) 
+  end.array <- mean(as.array(hire.temp2.array))
+  return(end.array)
+}
+```
+
+```{r Function_for_cosine_weight}
+#ModRe Hire
+weighted.averages <- function(){
+  my.vec <- c()
+  for (i in seq(from = 6229 , to = 7009 , by = 12)) {
+    my.array <- ncvar_get(hire_temp2_1421_2008, varid = "temp2", 
+                           start = c(1, 1, i), count = c(-1, -1, 12))
+    my.weighted.array <- apply(my.array, c(1, 3), "*", cos(pi * lat.hire.temp  / 180))
+    my.values <- apply(my.weighted.array, 3, mean) / mean(cos(pi * lat.hire.temp / 180))
+    my.mean <- mean(my.values)
+    my.vec <- c(my.vec, my.mean)
+  }
+  return(my.vec)
+}
+
+#Mod-Re Lowre
+weighted.averages.lowre <- function(){
+  my.vec <- c()
+  for (i in seq(from = 6241 , to = 7021 , by = 12)) {
+    my.array <- ncvar_get(lowre_temp2_1421_2008, varid = "temp2", 
+                           start = c(1, 1, i), count = c(-1, -1, 12))
+    my.weighted.array <- apply(my.array, c(1, 3), "*", cos(pi * lat.lowre.temp  / 180))
+    my.values <- apply(my.weighted.array, 3, mean) / mean(cos(pi * lat.lowre.temp / 180))
+    my.mean <- mean(my.values)
+    my.vec <- c(my.vec, my.mean)
+  }
+  return(my.vec)
+}
+
+#ERA-5 
+ERA.weighted.averages <- function(){
+  my.vec <- c()
+  for (i in seq(from = 1 , to = 792 , by = 12)) {
+    my.array <- ncvar_get(ERA_5_temp_1940_2005, varid = "t2m", 
+                           start = c(1, 1, i), count = c(-1, -1, 12))
+    my.weighted.array <- apply(my.array, c(1, 3), "*", cos(pi * lat.ERA.temp  / 180))
+    my.values <- apply(my.weighted.array, 3, mean) / mean(cos(pi * lat.ERA.temp / 180))
+    my.mean <- mean(my.values)
+    my.vec <- c(my.vec, my.mean)
+  }
+  return(my.vec)
+}
+```
+
+Data
+
+```{r Data_absolut}
+# Create vectors 
+ModE.RAhires.temp <- c(weighted.averages())
+
+ModE.RA.temp <- c(weighted.averages.lowre())
+
+ERA.5.temp <- c(ERA.weighted.averages())
+
+#create a tibble
+global.average.1940.2005 <- tibble("Year" = c(1940: 2005), 
+                                          "ModRe_hire" = ModE.RAhires.temp ,
+                                          "ModRe_lowre" = ModE.RA.temp,
+                                          "ERA_5" = ERA.5.temp) |>
+    mutate("Anomalie_ModRe" = ModRe_lowre - ModRe_hire) |>
+    mutate("Anomalie_ERA" = ModRe_hire - ERA_5)
+```
+
+```{r Data_anomaly}
+# same period as polvani et al. 2019 --> compare!
+world.1985.1990 <- create.a.period(1985)
+
+#djf 1992
+world.1992 <- create.a.year(1992)
+
+# same period as polvani et al. 2019 --> compare!
+world.djf.1985.1990 <- create.a.djf.period(1985)
+
+#djf 1992
+world.djf.1992 <- create.a.djf.year(1992)
+```
+
+
+Plots
+
+```{r Plot_absolut}
+#plot global temperature for 1940-2005
+pdf("modellvergleich_abolute_temperatur.pdf",
+    width = 12 / 2.54, height = 10 / 2.54)
+ggplot(global.average.1940.2005,
+      aes(x = `Year`, y = `Anomalie_ERA`)) +
+      scale_y_continuous(limits = c(0, 1)) +
+      geom_line(color = "magenta3", size = 0.2) +
+      geom_point(color = "black", size = 1, shape = 5) +
+      geom_smooth(aes(y = `Anomalie_ERA` ), method = "lm", formula = y~x,
+                  color = "red") +
+      stat_regline_equation(label.y = 0.9,
+                            aes(label = ..eq.label..), formula = y~x) +
+      stat_regline_equation(label.y = 0.77 , 
+                            aes(label = ..rr.label..), formula = y~x) +
+      geom_vline(xintercept = 1991, linetype = "dotdash",
+             color = "firebrick", size = 0.3) +
+      annotate("text", x = 1990.5, y = 0.65, label="Pinatubo [1991]", 
+           angle = 90, color = "firebrick", hjust = 0, vjust = 0) +
+      labs(x = "Jahr [1940 - 2005]", y = "Anomalie [Kelvin]", 
+           subtitle = "Anomalie ModRe [hire] vs. ERA-5") +
+      geom_hline(yintercept = mean(global.average.1940.2005$Anomalie_ERA),
+            color = "grey3", type = "dotted", size = 0.2) +
+      annotate('ribbon', x = c(-Inf, Inf), 
+               ymin = (mean(global.average.1940.2005$Anomalie_ERA) - 
+                         sd(global.average.1940.2005$Anomalie_ERA)), 
+               ymax = (mean(global.average.1940.2005$Anomalie_ERA) + 
+                         sd(global.average.1940.2005$Anomalie_ERA)), 
+           alpha = 0.1, fill = 'royalblue') +
+      ggtitle("Globale Temperaturanomalie [1940-2005]") + 
+      theme_bw()+
+      theme(panel.border = element_rect(colour = "black",
+                                        fill=NA, linewidth = 1))
+dev.off()
+
+#plot anomalies for 1940-2005
+pdf("modellvergleich_temperatur_anomalie.pdf",
+    width = 12 / 2.54, height = 10 / 2.54)
+ggplot(global.average.1940.2005,
+      aes(x = `Year`, y = `Anomalie_ModRe`)) +
+      scale_y_continuous(limits = c(-1, 1)) +
+      geom_line(color = "orange", size = 0.5) +
+      geom_point(color = "black", size = 1, shape = 5) +
+      geom_smooth(aes(y = `Anomalie_ModRe` ), method = "lm", 
+                  , color = "red", formula = y~x) +
+      stat_regline_equation(label.y = 0.9, aes(label = ..eq.label..), formula = y~x) +
+      stat_regline_equation(label.y = 0.7 , aes(label = ..rr.label..), formula = y~x) +
+      ggtitle("Globale Temperaturanomalie [1940-2005]") + 
+      geom_vline(xintercept = 1991, linetype = "dotdash",
+             color = "firebrick", size = 0.3) +
+      annotate("text", x = 1990.5, y = 0.3, label="Pinatubo [1991]", 
+           angle = 90, color = "firebrick", hjust = 0, vjust = 0) +
+      labs(x = "Jahr [1940 - 2005]", y = "Anomalie [Kelvin]", 
+           subtitle = "Anomalie von ModE-RA [hire] vs. ModE-RA [lowre]") +
+      geom_hline(yintercept = mean(global.average.1940.2005$Anomalie_ModRe),
+                                   color = "grey3", type = "dotted", size = 0.2) +
+      annotate('ribbon', x = c(-Inf, Inf), 
+               ymin = (mean(global.average.1940.2005$Anomalie_ModRe) -
+                              sd(global.average.1940.2005$Anomalie_ModRe)), 
+               ymax = (mean(global.average.1940.2005$Anomalie_ModRe) +
+                         sd(global.average.1940.2005$Anomalie_ModRe)), 
+           alpha = 0.1, fill = 'royalblue') +
+      theme_bw() +
+      theme(panel.border = element_rect(colour = "black", fill=NA, size = 1))
+dev.off()
+```
+
+```{r Plot_anomaly}
+#Plot NH winter warming
+pdf("rasterplot_winter_warming.pdf",
+    width = 7, height = 5)
+z <- world.1992 - world.1985.1990
+#organize coordinates
+x <- lon.hire.temp
+y <- rev(lat.hire.temp)
+z <- z[,rev(1:length(lat.hire.temp))]
+#define the levels                  
+  mylevs <- max(max(10), abs(min(-10))) * (c(0:20)-10) / 10 
+resplot = filled.contour(x, y, z, levels = mylevs, 
+ color.palette = colorRampPalette(matlab.like2(20), space = "Lab"), 
+  plot.title = title(main = "Temperatur 1992 vs. (1985-1990)"),
+  key.title = title(main="[K]"), 
+  plot.axes={maps::map("world",interior=F,add=T)})
+dev.off()
+
+
+pdf("rasterplot_winter_warming_EU.pdf",
+    width = 7, height = 5)
+z <- world.djf.1992 - world.djf.1985.1990
+sel.lon.min <- which(abs(lon.hire.temp - -30) == 
+                       min(abs(lon.hire.temp - -30)))
+sel.lat.min <- which(abs(lat.hire.temp - 30) == 
+                       min(abs(lat.hire.temp - 30)))
+sel.lon.max <- which(abs(lon.hire.temp - 60) ==
+                       min(abs(lon.hire.temp - 60))) 
+ sel.lat.max <- which(abs(lat.hire.temp - 80) == 
+                        min(abs(lat.hire.temp - 80)))
+sel.lon <- c(sel.lon.min : sel.lon.max)
+sel.lat <- c(sel.lat.min : sel.lat.max)
+x <- lon.hire.temp[sel.lon]
+y <- lat.hire.temp[sel.lat]
+z <- z[sel.lon, sel.lat]
+  mylevs <- max(max(10), abs(min(-10))) * (c(0:20)-10) / 10 
+cont.plot.EU <- filled.contour(x, y, z, 
+    levels = mylevs, color.palette = colorRampPalette(matlab.like2(20), space = "Lab"), 
+    plot.title = title(main = "Temperatur  1992 [djf] vs. 1985-1990 [djf]"),
+    key.title = title(main="[K]"), 
+    plot.axes={maps::map("world",interior=F,add=T)})
+dev.off()
+```
+
+

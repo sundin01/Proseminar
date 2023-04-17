@@ -1,0 +1,348 @@
+---
+title: "ModE_RAhires_slp"
+author: "Patrick Bigler"
+date: "2023-04-16"
+output: html_document
+---
+
+Preparation
+```{r activates_the_packages_in_the_libraries}
+library(ncdf4)
+library(maps)
+library(ggmap)
+library(tidyverse)
+library(mapdata)
+library(reshape)
+library(RColorBrewer)
+library(knitr)
+library(conflicted) 
+library(ggplot2)
+library(ggsn)
+library(ggspatial)
+library(cowplot)
+library(tinytex)
+library(grid)
+library(viridis)
+library(viridisLite)
+library(weathermetrics)
+library(colorRamps)
+library(colorRamp2)
+library(ggpubr)
+library(zoo)
+library(corrplot)
+library(ggcorrplot)
+library(ggpmisc)
+library(gridExtra)
+library(gridtext)
+library(grid)
+library(lattice)
+```
+
+```{r read_the_files}
+# Check if the path is right
+getwd()
+
+# read the high resolution file for 2m-temperature (ModE-RA)
+hire_slp_1421_2008 <- nc_open("../Data/ModE_RAhires_slp")
+hire_temp2_1421_2008 <- nc_open("../Data/ModE_RAhires_temp")
+```
+
+```{r read_the_dimensions}
+#read the time dimensions
+time.hire.slp <- hire_slp_1421_2008$dim[[1]]$vals 
+#read the logitude dimensions
+lon.hire.slp <- hire_slp_1421_2008$dim[[2]]$vals
+#read the latitude dimensions
+lat.hire.slp <- hire_slp_1421_2008$dim[[3]]$vals
+
+#read the time dimensions
+time.hire.temp <- hire_temp2_1421_2008$dim[[1]]$vals 
+#read the logitude dimensions
+lon.hire.temp <- hire_temp2_1421_2008$dim[[2]]$vals
+#read the latitude dimensions
+lat.hire.temp <- hire_temp2_1421_2008$dim[[3]]$vals
+```
+
+Functions
+```{r Function_to_create_a_5_year_period}
+# For ModRe
+create.a.slp.period <- function(ann) {
+# We use the formula to calculate a index because we want to start on January
+  index = (ann - 1421) * 12 + 1
+# Read the file and save the values in an array
+  my.vec <- ncvar_get(hire_slp_1421_2008, varid = "slp", 
+                           start = c(1, 1, index), count = c(-1, -1, 60))
+# Take the mean for each cell (each cell contains 60 values)
+  my.array <- apply(my.vec, c(1, 2), mean)
+  return(my.array)
+}
+```
+
+```{r Function_to_read_a_certain_year}
+#for ModRe
+create.a.slp.year <- function(ann) {
+# We use the formula to calculate a index because we want to start on January  
+  index = (ann - 1421) *12 + 1
+# Read the file and save the values in an array  
+  my.vec <- ncvar_get(hire_slp_1421_2008, varid = "slp", 
+                           start = c(1, 1, index), count = c(-1, -1, 12))
+# Take the mean for each cell (each cell contains 60 values)  
+  my.array <- apply(my.vec, c(1, 2), mean)
+  return(my.array)
+}
+```
+
+```{r Function_to_read_djf_period}
+# Function to read the seasonal djf mean value for each year in a 5-year-period
+create.a.djf.slp.period <- function(ann) {
+# We use the formula to calculate a index because we want to start on December
+  index.start <- (ann - 1421) * 12
+# Read the file and save the values in an array    
+  hire.slp.array <- ncvar_get(hire_slp_1421_2008, varid = "slp",
+                            start=c(1, 1, index.start ), count=c(-1, -1, 60 ))
+# create a empty vector.
+  numbers.of.month <- c()  
+# loop to fill the vector ( we want only Dec, Jan, Feb for each year)
+  for (i in 1:5) {
+    new.value.1 = i * 12 - 11
+    new.value.2 = i * 12 - 10
+    new.value.3 = i * 12 - 9
+# Fill the vector with every turn  
+    numbers.of.month = c(numbers.of.month, 
+                         new.value.1, 
+                         new.value.2, 
+                         new.value.3)
+  }
+# Create an array an read all the values we need 
+# Every longitude (1:184), every latitude (1:192) and our special time vector
+  sub.array <- hire.slp.array[c(1:384), c(1:192), numbers.of.month]
+# Take the seasonal mean and return the end array with djf season for 5 years
+  end.array <- apply(sub.array, c(1, 2), mean)
+  return(end.array)
+}
+```
+
+```{r Function_to_read_djf_year}
+# For ModE-RA
+create.a.djf.slp.year <- function(ann) {
+# We use the formula to calculate a index because we want to start on December
+  index.start <- (ann - 1421) * 12
+# Read the file and save the values in an array      
+  hire.slp.array <- ncvar_get(hire_slp_1421_2008, varid = "slp",
+                            start=c(1, 1, index.start ), count=c(-1, -1, 3 ))
+# Take the mean for each cell (each cell contains 3 values)  
+  end.array <- apply(hire.slp.array, c(1, 2), mean)
+  return(end.array)
+}
+```
+
+```{r Function_for_cosine_weight}
+#ModRe Hire
+weighted.slp.averages <- function(){
+  my.vec <- c()
+  for (i in seq(from = 6229 , to = 7009 , by = 12)) {
+    my.array <- ncvar_get(hire_slp_1421_2008, varid = "slp", 
+                           start = c(1, 1, i), count = c(-1, -1, 12))
+    my.weighted.array <- apply(my.array, c(1, 3), "*", cos(pi * lat.hire.slp  / 180))
+    my.values <- apply(my.weighted.array, 3, mean) / mean(cos(pi * lat.hire.slp / 180))
+    my.mean <- mean(my.values)
+    my.vec <- c(my.vec, my.mean)
+  }
+  return(my.vec)
+}
+```
+
+```{r Function_NAO_slp_and_temp}
+create.a.NAO.period.slp <- function(ann, ann.end, lat, lon) {
+  index = (ann - 1421) * 12 + 1
+  index.end <- (ann.end - 1421) * 12 + 13
+  delta.index <- index.end - index
+  sel.lon <- which(abs(lon.hire.slp - lon) == min(abs(lon.hire.slp - lon)))
+  sel.lat <- which(abs(lat.hire.slp - lat) == min(abs(lat.hire.slp - lat)))
+  my.vec <- ncvar_get(hire_slp_1421_2008, varid = "slp", 
+              start = c(sel.lon, sel.lat, index), count = c(1, 1, delta.index))
+  return(my.vec)
+}
+
+create.a.NAO.period.temp <- function(lat, lon) {
+  sel.lon <- which(abs(lon.hire.temp - lon) == min(abs(lon.hire.temp - lon)))
+  sel.lat <- which(abs(lat.hire.temp - lat) == min(abs(lat.hire.temp - lat)))
+  my.vec <- c()
+  for (i in c(5329 : 7020)) {
+      my.array <- ncvar_get(hire_temp2_1421_2008, varid = "temp2", 
+              start = c(sel.lon, sel.lat, i), 
+              count = c(59,42 , 1))
+      my.value <- mean(as.array(my.array))
+      my.vec <- c(my.vec, my.value)
+  }
+  return(my.vec)
+}
+```
+
+Data
+```{r Data_absolut}
+NAO.temp <- create.a.NAO.period.temp(75, -10)
+NAO.iceland <- create.a.NAO.period.slp(1865, 2005, 65.1, -22.8)
+NAO.azoren <- create.a.NAO.period.slp(1865, 2005, 37.5, -25.4)
+
+NAO.index <- tibble("year" = rep(1865 : 2005, each = 12),
+                    "month" = rep(c("Jan", "Feb", "Mar", "Apr", "Mai", "Jun", 
+                                  "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"),times = 141),
+                      "Stykkisholmer" = NAO.iceland,
+                      "Ponta_Delgado" = NAO.azoren,
+                      "Europa" = NAO.temp) 
+
+NAO.annual <- NAO.index|>
+  mutate(NAO_Index_Ice = (`Stykkisholmer` - mean(`Stykkisholmer`)) / sd(`Stykkisholmer`)) |>
+  mutate(NAO_Index_Azo = (`Ponta_Delgado` - mean(`Ponta_Delgado`)) / sd(`Ponta_Delgado`)) |>
+  mutate(NAO_Index = NAO_Index_Azo - NAO_Index_Ice) |>
+  group_by(year) |>
+  summarise(NAO.year = mean(NAO_Index), Temp.year = mean(Europa))
+
+NAO.index <- NAO.index |>
+  dplyr::filter(`month` == "Jan" | `month` == "Feb" | `month` == "Dez") |>
+  mutate(NAO_Index_Ice = (`Stykkisholmer` - mean(`Stykkisholmer`)) / sd(`Stykkisholmer`)) |>
+  mutate(NAO_Index_Azo = (`Ponta_Delgado` - mean(`Ponta_Delgado`)) / sd(`Ponta_Delgado`)) |>
+  mutate(NAO_Index = NAO_Index_Azo - NAO_Index_Ice) |>
+  group_by(year) |>
+  summarise(NAO.djf = mean(NAO_Index), Temp.djf = mean(Europa)) |>
+  mutate("NAO.year" = NAO.annual$NAO.year, "Temp.year" = NAO.annual$Temp.year) |>
+  select("year", "NAO.djf", "Temp.djf", "NAO.year", "Temp.year")
+```
+
+```{r Data_anomaly}
+# Global
+world.slp.1985.1990 <- create.a.slp.period(1985)
+world.slp.1992 <- create.a.slp.year(1992)
+
+# DJF Period
+world.slp.djf.1985.1990 <- create.a.djf.slp.period(1985)
+world.slp.djf.1992 <- create.a.djf.slp.year(1992)
+```
+
+Plots
+
+```{r NAO_index}
+conflicts_prefer(ggplot2::annotate)
+
+pdf("NAO_index_global.pdf",
+    width = 12 / 2.54, height = 10 / 2.54)
+ggplot(data = NAO.index, aes(x = `year`, y = `NAO.year`)) +
+  geom_bar(aes(fill = `NAO.year` < 0), stat = "identity", color = "black") + 
+  scale_fill_manual(guide = FALSE, breaks = c(TRUE, FALSE), values=c("blue", "red")) +
+  geom_vline(xintercept = 1991, color = "firebrick", 
+             linetype = "dotdash", size = 0.3) +
+  geom_hline(yintercept = 0) +
+  geom_line(aes(y = rollmean(`NAO.year`, 12, na.pad = TRUE, align = "center")),
+            linewidth = 1.5) +
+  annotate("text", x = 1989.5, hjust = 0 ,  y = -1, vjust = 0.5, label="Pinatubo [1991]", 
+           angle = 90, color = "firebrick", vjust = 1) +
+  ylim(-1, 1) +
+  labs(x = "Jahr [1940-2005]", y = "NAO-Index", 
+           subtitle = "Ponta Delgado [65.1°N, 22.8°W]  \nStykkisholmer [37.5°N, 25.4°W]") +
+  ggtitle("Jährlicher NAO Index [nach Hurrell]") + 
+  theme_classic() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, linewidth = 1))
+dev.off()
+
+pdf("NAO_index.djf.pdf",
+    width = 12 / 2.54, height = 10 / 2.54)
+ggplot(data = NAO.index, aes(x = `year`, y = `NAO.djf`)) +
+  geom_bar(aes(fill = `NAO.djf` < 0), stat = "identity", color = "black") + 
+  scale_fill_manual(guide = FALSE, breaks = c(TRUE, FALSE), values=c("blue", "red")) +
+  geom_vline(xintercept = 1991, color = "firebrick", 
+             linetype = "dotdash", size = 0.3) +
+  geom_hline(yintercept = 0) +
+  geom_line(aes(y = rollmean(`NAO.djf`, 10, na.pad = TRUE, align = "center")),
+            linewidth = 1.5) +
+  ylim(-3, 3) +
+  annotate("text", x = 1989.5, y = -3 ,vjust = 0.5, hjust = 0, label="Pinatubo [1991]", 
+           angle = 90, color = "firebrick") +
+  labs(x = "Jahr [1940-2005]", y = "NAO-Index", 
+           subtitle = "Ponta Delgado [65.1°N, 22.8°W], \nStykkisholmer [37.5°N, 25.4°W]") +
+  ggtitle("NAO Index für DJF [nach Hurrell]") + 
+  theme_classic() +
+  theme(panel.border = element_rect(colour = "black", fill=NA, linewidth  = 1))
+dev.off
+```
+
+
+```{r Plot_absolut}
+pdf("NAO_korrelation.pdf",
+    width = 12 / 2.54, height = 10 / 2.54)
+NAO.index|>
+  select(NAO.djf, Temp.djf, Temp.year, NAO.year) |>
+  cor(use = "pairwise", method = "pearson") |>
+  ggcorrplot::ggcorrplot(hc.order = TRUE, type = "lower", lab = TRUE) +
+  labs(title = "Übersicht Korrelation", 
+       subtitle = "Methode: Pearson") +
+# add an individual panel boarder  
+  theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)) +
+  theme( legend.background = element_rect( fill = NULL, 
+                size = 0.5, linetype = "solid", colour = "black"))
+dev.off()
+
+pdf("NAO_Regressionsmodell.pdf",
+    width = 12 / 2.54, height = 10 / 2.54)
+NAO.index|>
+  ggplot(aes(x = Temp.djf, y = NAO.djf)) +
+  geom_point() +
+  geom_smooth(formula = y ~ x, method = "lm", se = TRUE) +
+  stat_poly_eq(use_label(c("eq", "R2"))) +
+  labs(title = "Lineare Regression  [Für DJF]", 
+       subtitle = "Temperatur über Europa [lat: 75°N - 35°N, lon: 10°W - 40°E] \nNAO-Index nach Hurrell", 
+       x = "Temperatur [K]", y = "NAO-Index") +
+# plot the title bold
+  theme(plot.title = element_text(size = 15, face = "bold")) +
+  theme_bw() +
+# add an individual panel boarder  
+  theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 1)) +
+  theme(legend.background = element_rect( fill = NULL, 
+                size = 0.5, linetype = "solid", colour = "black"))
+dev.off()
+```
+
+```{r Plot_anomaly}
+#Plot NH winter warming
+pdf("rasterplot_slp_global.pdf",
+    width = 7, height = 5)
+z <- world.slp.1992 - world.slp.1985.1990
+#organize coordinates
+x <- lon.hire.slp
+y <- rev(lat.hire.slp)
+z <- z[,rev(1:length(lat.hire.slp))]
+#define the levels                  
+  mylevs <- max(max(1200), abs(min(-1200))) * (c(0:20)-10) / 10 
+  resplot = filled.contour(x, y, z, levels = mylevs, 
+  color.palette = colorRampPalette(matlab.like2(20), space = "Lab"), 
+  plot.title = title(main = "Temperatur 1992 vs. (1985-1990)"),
+  key.title = title(main="[Pa]"), 
+  plot.axes={maps::map("world",interior=F,add=T)})
+dev.off()
+
+
+pdf("rasterplot_slp_djf.pdf",
+    width = 7, height = 5)
+z <- world.slp.djf.1992 - world.slp.djf.1985.1990
+sel.lon.min <- which(abs(lon.hire.slp - -30) == 
+                       min(abs(lon.hire.slp - -30)))
+sel.lat.min <- which(abs(lat.hire.slp - 30) == 
+                       min(abs(lat.hire.slp - 30)))
+sel.lon.max <- which(abs(lon.hire.slp - 60) ==
+                       min(abs(lon.hire.slp - 60))) 
+ sel.lat.max <- which(abs(lat.hire.slp - 80) == 
+                        min(abs(lat.hire.slp - 80)))
+sel.lon <- c(sel.lon.min : sel.lon.max)
+sel.lat <- c(sel.lat.min : sel.lat.max)
+x <- lon.hire.slp[sel.lon]
+y <- lat.hire.slp[sel.lat]
+z <- z[sel.lon, sel.lat]
+  mylevs <- max(max(1200), abs(min(-1200))) * (c(0:20)-10) / 10 
+cont.plot.EU <- filled.contour(x, y, z, 
+    levels = mylevs, color.palette = colorRampPalette(matlab.like2(20), space = "Lab"), 
+    plot.title = title(main = "Temperatur  1992 [djf] vs. 1985-1990 [djf]"),
+    key.title = title(main="[Pa]"), 
+    plot.axes={maps::map("world",interior=F,add=T)})
+dev.off()
+```
+
